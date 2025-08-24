@@ -19,6 +19,7 @@ icon=metadata/icon.png
 # - 1: linear, less blocky visuals
 # - 2: anisotropic/best, higher computational overhead than linear, but provides the best visual quality
 # scale_quality=0
+scale_quality=1
 
 # === Directories to Ignore during packaging ===
 # A comma delimited list of directories that should be ignored during the
