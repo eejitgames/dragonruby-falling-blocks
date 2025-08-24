@@ -125,11 +125,39 @@ def self.tick_game
 
     move_loose_blocks_down if $gg.loose_blocks
 
-    if $inputs.keyboard.key_down.left
+    if $inputs.keyboard.left
+      if $gg.clock - $gg.left_moved_at >= $gg.left_cooldown
+        move_block_left
+        $gg.left_moved_at = $gg.clock
+        $gg.left_pending = false
+      else
+        $gg.left_pending = true
+      end
+    elsif $gg.left_pending && $gg.clock - $gg.left_moved_at >= $gg.left_cooldown
       move_block_left
-    elsif $inputs.keyboard.key_down.right
+      $gg.left_moved_at = $gg.clock
+      $gg.left_pending = false
+    else
+      $gg.left_pending = false
+    end
+
+    if $inputs.keyboard.right
+      if $gg.clock - $gg.right_moved_at >= $gg.right_cooldown
+        move_block_right
+        $gg.right_moved_at = $gg.clock
+        $gg.right_pending = false
+      else
+        $gg.right_pending = true
+      end
+    elsif $gg.right_pending && $gg.clock - $gg.right_moved_at >= $gg.right_cooldown
       move_block_right
-    elsif $inputs.keyboard.down
+      $gg.right_moved_at = $gg.clock
+      $gg.right_pending = false
+    else
+      $gg.right_pending = false
+    end
+
+    if $inputs.keyboard.down
       move_block_down
     end
 
@@ -226,24 +254,6 @@ def self.move_block_down
   check_for_flower_clusters unless landed_blocks.empty?
 end
 
-=begin
-def self.move_block_down
-  fb = $gg.falling_blocks.first
-  return unless fb
-
-  next_y = fb[:y] - 0.5
-  next_y_floor = next_y.floor
-
-  if next_y < 0 || get_block(fb[:x], next_y_floor)
-    fb[:y] = fb[:y].floor
-    set_block(fb[:x], fb[:y], fb)
-    $gg.falling_blocks.shift
-    check_for_flower_clusters
-  else
-    fb[:y] = next_y
-  end
-end
-=end
 def self.render_grid
   $gg.grid.each do |block|
     next unless block
@@ -405,7 +415,13 @@ def self.bootstrap
     blinking_shapes: [],
     falling_blocks: [],
     moved_loose_blocks: [],
-    loose_blocks: nil
+    loose_blocks: nil,
+    left_moved_at: 0,
+    left_pending: false,
+    left_cooldown: 8,
+    right_moved_at: 0,
+    right_pending: false,
+    right_cooldown: 8
   }
   $gg.grid = Array.new(GRID_WIDTH * GRID_HEIGHT)
 end
