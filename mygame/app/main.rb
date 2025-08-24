@@ -26,6 +26,7 @@ GRID_PIXEL_HEIGHT = GRID_HEIGHT * TILE_SIZE
 GRID_OFFSET_X = ((GAME_WIDTH - GRID_PIXEL_WIDTH) / 2).floor
 GRID_OFFSET_Y = ((GAME_HEIGHT - GRID_PIXEL_HEIGHT) / 2).floor
 
+# these shapes require 1 sun, soil, water, and seed in any position
 SHAPES = {
   square: [
     [[0,0],[1,0],[0,1],[1,1]]
@@ -59,6 +60,22 @@ SHAPES = {
   z_shape: [
     [[0,0],[1,0],[1,1],[2,1]],
     [[1,0],[0,1],[1,1],[0,2]],
+  ]
+}
+
+# these shapes are fixed, specific elements are in required positions
+# three seeds in a row
+# a plus sign, soil in the middle, surrounded by water
+FIXED_SHAPES = {
+  three_seeds: [
+    { coords: [[0,0],[1,0],[2,0]], types: [:seed, :seed, :seed] },
+    { coords: [[0,0],[0,1],[0,2]], types: [:seed, :seed, :seed] }
+  ],
+  plus_soil_water: [
+    {
+      coords: [[0,0],[0,-1],[0,1],[-1,0],[1,0]],
+      types: [:soil, :water, :water, :water, :water]
+    }
   ]
 }
 
@@ -375,6 +392,50 @@ end
 def self.check_for_flower_clusters
   $gg.blinking_shapes ||= []
 
+  all_shapes = SHAPES.transform_values do |orientations|
+    orientations.map do |coords|
+      { coords: coords, types: RESOURCE_TYPES.reject { |t| t == :rock } }
+    end
+  end.merge(FIXED_SHAPES)
+
+  GRID_WIDTH.times do |x|
+    GRID_HEIGHT.times do |y|
+      all_shapes.each do |shape_name, patterns|
+        patterns.each do |pattern|
+          coords = pattern[:coords]
+          expected_types = pattern[:types]
+
+          blocks = coords.map { |dx, dy| get_block(x + dx, y + dy) }
+          next if blocks.any?(&:nil?)
+
+          actual_types = blocks.map { |b| b[:type] }
+
+          match = if expected_types.is_a?(Array) && expected_types.all? { |t| RESOURCE_TYPES.include?(t) } && expected_types.size == actual_types.size
+                    actual_types.sort == expected_types.sort
+                  else
+                    actual_types == expected_types
+                  end
+
+          if match
+            unless $gg.blinking_shapes.any? { |s| (s[:blocks] & blocks).any? }
+              $gg.blinking_shapes << {
+                blocks: blocks.dup,
+                timer: 60,
+                visible: true,
+                blink_interval: 10
+              }
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
+=begin
+def self.check_for_flower_clusters
+  $gg.blinking_shapes ||= []
+
   GRID_WIDTH.times do |x|
     GRID_HEIGHT.times do |y|
       SHAPES.each do |shape_name, orientations|
@@ -398,6 +459,7 @@ def self.check_for_flower_clusters
     end
   end
 end
+=end
 
 def self.bootstrap
   $gg = {
