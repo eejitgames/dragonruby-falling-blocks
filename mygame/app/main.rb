@@ -64,6 +64,7 @@ SHAPES = {
 }
 
 # these shapes are fixed, specific elements are in required positions
+# test shapes:
 # three seeds in a row
 # a plus sign, soil in the middle, surrounded by water
 FIXED_SHAPES = {
@@ -390,8 +391,6 @@ def self.any_loose_blocks?
 end
 
 def self.check_for_flower_clusters
-  $gg.blinking_shapes ||= []
-
   all_shapes = SHAPES.transform_values do |orientations|
     orientations.map do |coords|
       { coords: coords, types: RESOURCE_TYPES.reject { |t| t == :rock } }
@@ -477,6 +476,7 @@ def self.bootstrap
     blinking_shapes: [],
     falling_blocks: [],
     moved_loose_blocks: [],
+    blinking_shapes: [],
     loose_blocks: nil,
     left_moved_at: 0,
     left_pending: false,
