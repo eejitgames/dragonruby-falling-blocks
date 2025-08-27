@@ -1,8 +1,8 @@
 # Remove the pound sign and leading space for the properties below before publishing your game.
 devid=eejitgames
 devtitle=eejit
-gameid=walled-garden
-gametitle=Walled Garden
+gameid=flower-garden
+gametitle=Flower Garden
 version=0.1
 icon=metadata/icon.png
 

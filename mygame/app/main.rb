@@ -80,6 +80,10 @@ FIXED_SHAPES = {
   ]
 }
 
+ALL_SHAPES = SHAPES.transform_values do |orientations|
+  orientations.map { |coords| { coords: coords, types: RESOURCE_TYPES.reject { |t| t == :rock } } }
+end.merge(FIXED_SHAPES)
+
 def self.boot args
   args.state = {}
   bootstrap
@@ -391,15 +395,9 @@ def self.any_loose_blocks?
 end
 
 def self.check_for_flower_clusters
-  all_shapes = SHAPES.transform_values do |orientations|
-    orientations.map do |coords|
-      { coords: coords, types: RESOURCE_TYPES.reject { |t| t == :rock } }
-    end
-  end.merge(FIXED_SHAPES)
-
   GRID_WIDTH.times do |x|
     GRID_HEIGHT.times do |y|
-      all_shapes.each do |shape_name, patterns|
+      ALL_SHAPES.each do |shape_name, patterns|
         patterns.each do |pattern|
           coords = pattern[:coords]
           expected_types = pattern[:types]
@@ -515,7 +513,7 @@ end
 
 def self.tick_title
   $outputs[:garden].labels << {
-    x: 1260 / 2, y: 500, font: "fonts/IndieFlower-Regular.ttf", size_px: 192, r: 100, g: 200, b: 100, text: "Walled Garden", anchor_x: 0.5
+    x: 1260 / 2, y: 500, font: "fonts/IndieFlower-Regular.ttf", size_px: 256, r: 100, g: 200, b: 100, text: "Flower Garden", anchor_x: 0.5
   }
   return if $gg.clock < 30
   if $inputs.keyboard.key_down.r && $inputs.keyboard.key_held.h
