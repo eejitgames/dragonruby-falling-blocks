@@ -1,0 +1,21 @@
+* EXCEPTION:
+* ERROR - :< method missing on ~Array~.
+
+#+begin_src ~Array#inspect~
+[-1, 5]
+#+end_src ~Array#inspect~
+
+
+
+The method named
+  :<
+with args
+  [[0, 5]]
+doesn't exist on [Array, #<Class:#<Array:0x7f48a8785fb0>>, Enumerable].
+
+(suggestions above)
+** Backtrace:
+*** app/main.rb:347:in render_grid
+*** app/main.rb:337:in render_grid
+*** app/main.rb:204:in tick_game
+*** app/main.rb:130:in tick

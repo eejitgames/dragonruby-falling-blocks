@@ -80,6 +80,19 @@ FIXED_SHAPES = {
   ]
 }
 
+FLOWER_TYPES = {
+  o_shape: :flower_daisy,
+  j_shape: :flower_rose,
+  l_shape: :flower_tulip,
+  t_shape: :flower_sunflower,
+  i_shape: :flower_orchid,
+  s_shape: :flower_lily,
+  z_shape: :flower_peony
+}
+  #three_seeds: :flower_seedling,
+  #plus_soil_water: :flower_lotus
+#}
+
 ALL_SHAPES = SHAPES.transform_values do |orientations|
   orientations.map { |coords| { coords: coords, types: RESOURCE_TYPES.reject { |t| t == :rock } } }
 end.merge(FIXED_SHAPES)
@@ -326,6 +339,17 @@ def self.render_grid
         blink[:blocks].each { |b| set_block(b[:x], b[:y], nil) }
         $gg.score += 10
         $gg.camera_trauma = 0.5
+
+        if blink[:shape]
+          flower_type = FLOWER_TYPES[blink[:shape]]
+          if flower_type
+            flower_block = lowest_leftmost_block(blink[:blocks])
+            set_block(flower_block[:x], flower_block[:y], {
+              type: flower_type, x: flower_block[:x], y: flower_block[:y]
+            })
+          end
+        end
+
         true
       else
         false
@@ -333,7 +357,55 @@ def self.render_grid
     end
   end
 
+=begin
+    $gg.blinking_shapes.reject! do |blink|
+      if blink[:timer] <= 0
+        blink[:blocks].each { |b| set_block(b[:x], b[:y], nil) }
+        $gg.score += 10
+        $gg.camera_trauma = 0.5
+
+        # Place flower at the *center* of the shape
+        if blink[:shape]
+          flower_type = FLOWER_TYPES[blink[:shape]]
+          if flower_type
+            avg_x = (blink[:blocks].sum { |b| b[:x] }.fdiv(blink[:blocks].size)).round
+            avg_y = (blink[:blocks].sum { |b| b[:y] }.fdiv(blink[:blocks].size)).round
+            set_block(avg_x, avg_y, { type: flower_type, x: avg_x, y: avg_y })
+          end
+        end
+
+        true
+      else
+        false
+      end
+    end
+  end
+=end
+
+=begin
+    $gg.blinking_shapes.reject! do |blink|
+      if blink[:timer] <= 0
+        blink[:blocks].each { |b| set_block(b[:x], b[:y], nil) }
+        $gg.score += 10
+        $gg.camera_trauma = 0.5
+        true
+      else
+        false
+      end
+    end
+  end
+=end
   draw_grid_outline
+end
+
+def self.lowest_leftmost_block(blocks)
+  blocks.reduce(nil) do |best, b|
+    if best.nil? || b[:y] < best[:y] || (b[:y] == best[:y] && b[:x] < best[:x])
+      b
+    else
+      best
+    end
+  end
 end
 
 def self.move_loose_blocks_down
@@ -416,6 +488,7 @@ def self.check_for_flower_clusters
           if match
             unless $gg.blinking_shapes.any? { |s| (s[:blocks] & blocks).any? }
               $gg.blinking_shapes << {
+                shape: shape_name,
                 blocks: blocks.dup,
                 timer: 60,
                 visible: true,
@@ -428,6 +501,43 @@ def self.check_for_flower_clusters
     end
   end
 end
+
+=begin
+def self.check_for_flower_clusters
+  GRID_WIDTH.times do |x|
+    GRID_HEIGHT.times do |y|
+      ALL_SHAPES.each do |shape_name, patterns|
+        patterns.each do |pattern|
+          coords = pattern[:coords]
+          expected_types = pattern[:types]
+
+          blocks = coords.map { |dx, dy| get_block(x + dx, y + dy) }
+          next if blocks.any?(&:nil?)
+
+          actual_types = blocks.map { |b| b[:type] }
+
+          match = if expected_types.is_a?(Array) && expected_types.all? { |t| RESOURCE_TYPES.include?(t) } && expected_types.size == actual_types.size
+                    actual_types.sort == expected_types.sort
+                  else
+                    actual_types == expected_types
+                  end
+
+          if match
+            unless $gg.blinking_shapes.any? { |s| (s[:blocks] & blocks).any? }
+              $gg.blinking_shapes << {
+                blocks: blocks.dup,
+                timer: 60,
+                visible: true,
+                blink_interval: 10
+              }
+            end
+          end
+        end
+      end
+    end
+  end
+end
+=end
 
 =begin
 def self.check_for_flower_clusters
