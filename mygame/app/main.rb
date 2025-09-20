@@ -1,23 +1,8 @@
-###############################################
-# FLOWER GARDEN - Falling Block Puzzle Game
-# Built with DragonRuby GTK
-#
-# Core idea: Like Tetris, but with resource blocks
-# (seed, soil, water, sun, rock). When certain
-# patterns (shapes) form, they bloom into flowers.
-###############################################
-
-############################
-# --- GLOBAL CONSTANTS ---
-############################
-
-# Window and game rendering dimensions
 WIDTH       = 1280
 HEIGHT      = 720
 GAME_WIDTH  = 1260
 GAME_HEIGHT = 700
 
-# Scaling (zoom) so the grid fits the game area
 ZOOM_WIDTH   = (WIDTH / GAME_WIDTH).floor
 ZOOM_HEIGHT  = (HEIGHT / GAME_HEIGHT).floor
 ZOOM         = [ZOOM_WIDTH, ZOOM_HEIGHT].min
@@ -26,38 +11,25 @@ OFFSET_Y     = ((HEIGHT - GAME_HEIGHT * ZOOM) / 2).floor
 ZOOMED_WIDTH  = GAME_WIDTH * ZOOM
 ZOOMED_HEIGHT = GAME_HEIGHT * ZOOM
 
-# Grid (playfield) settings
 GRID_WIDTH  = 10
 GRID_HEIGHT = 10
 TILE_SIZE   = 64
 
-# Types of blocks that can fall
-#RESOURCE_TYPES = [:seed, :soil, :water, :sun, :rock]
-RESOURCE_TYPES = [:seed, :soil, :water, :sun, :rock]
+RESOURCE_TYPES = [:seed, :soil, :water, :sun, :brick]
 
-# Pixel size of the grid
+WATER_FRAME_COUNT = 10
+WATER_TICKS_PER_FRAME = 6
+
 GRID_PIXEL_WIDTH  = GRID_WIDTH * TILE_SIZE
 GRID_PIXEL_HEIGHT = GRID_HEIGHT * TILE_SIZE
 
-# Grid’s offset (so it’s centered in the play area)
 GRID_OFFSET_X = ((GAME_WIDTH - GRID_PIXEL_WIDTH) / 2).floor
 GRID_OFFSET_Y = ((GAME_HEIGHT - GRID_PIXEL_HEIGHT) / 2).floor
 
-SCENES = {
-  setup: -> { tick_setup },
-  title: -> { tick_title },
-  game:  -> { tick_game },
-  over:  -> { tick_over }
-}
-
-##################################
-# --- SHAPE DEFINITIONS ---
-##################################
-
-# General shapes: position only matters (not block type).
-# Require one of each resource (except rock).
 SHAPES = {
-  o_shape: [ [[0,0],[1,0],[0,1],[1,1]] ],
+  o_shape: [
+    [[0,0],[1,0],[0,1],[1,1]]
+  ],
   j_shape: [
     [[0,0],[0,1],[0,2],[1,2]],
     [[0,1],[1,1],[2,1],[2,0]],
@@ -89,22 +61,18 @@ SHAPES = {
     [[1,0],[0,1],[1,1],[0,2]]
   ]
 }
-=begin
-# Fixed shapes: require specific block *types* in exact places
-FIXED_SHAPES = {
-  three_seeds: [
-    { coords: [[0,0],[1,0],[2,0]], types: [:seed, :seed, :seed] },
-    { coords: [[0,0],[0,1],[0,2]], types: [:seed, :seed, :seed] }
-  ],
-  plus_soil_water: [
-    {
-      coords: [[0,0],[0,-1],[0,1],[-1,0],[1,0]],
-      types: [:soil, :water, :water, :water, :water]
-    }
-  ]
+
+BLINK_COLORS = {
+  o_shape: { r: 255, g: 255, b: 0  , a: 128 }, # Yellow
+  j_shape: { r: 0,   g: 0,   b: 255, a: 128 }, # Blue
+  l_shape: { r: 255, g: 165, b: 0  , a: 128 }, # Orange
+  t_shape: { r: 128, g: 0,   b: 128, a: 128 }, # Purple
+  i_shape: { r: 0,   g: 255, b: 255, a: 128 }, # Cyan
+  s_shape: { r: 0,   g: 255, b: 0  , a: 128 }, # Green
+  z_shape: { r: 255, g: 0,   b: 0  , a: 128 }, # Red
+  trapped_resources: { r: 25, g: 50, b: 25 }   # Background Green
 }
-=end
-# Each shape corresponds to a flower type
+
 FLOWER_TYPES = {
   o_shape: :flower_daisy,
   j_shape: :flower_rose,
@@ -115,7 +83,6 @@ FLOWER_TYPES = {
   z_shape: :flower_peony
 }
 
-# Flower shapes: Same geometry, but filled with flowers
 FLOWER_SHAPES = SHAPES.transform_keys do |shape_name|
   :"#{shape_name}_flowers"
 end.transform_values do |orientations|
@@ -126,36 +93,68 @@ end.transform_values do |orientations|
   end.flatten
 end
 
-# Combine all shape definitions into one lookup table (there should be no key duplicates)
 ALL_SHAPES = SHAPES.transform_values do |orientations|
-  orientations.map { |coords| { coords: coords, types: RESOURCE_TYPES.reject { |t| t == :rock } } }
+  orientations.map { |coords| { coords: coords, types: RESOURCE_TYPES.reject { |t| t == :brick } } }
 end.merge(FLOWER_SHAPES) #.merge(FIXED_SHAPES)
-
-############################
-# --- GAME LOOP METHODS ---
-############################
 
 def self.boot args
   args.state = {}
   bootstrap
 end
 
+def self.bootstrap
+  $gg = {
+    current_scene: :tick_setup,
+    next_scene: :tick_setup,
+    camera_trauma: 0.5,
+    camera_x_offset: 0,
+    camera_y_offset: 0,
+    score: 0,
+    total_score: 0,
+    high_score: 0,
+    total_score: 0,
+    clock: 0,
+    lost_focus: true,
+    bag: [],
+    title_flowers: [],
+    blinking_shapes: [],
+    falling_blocks: [],
+    moved_loose_blocks: [],
+    loose_blocks: nil,
+    left_moved_at: 0,
+    left_pending: false,
+    left_cooldown: 8,
+    right_moved_at: 0,
+    right_pending: false,
+    right_pending: false,
+    right_cooldown: 8,
+    tmp_blocks: [],
+    tmp_types: [],
+    tmp_bricks: [],
+    tmp_sprites: [],
+    cascade_multiplier: 1,
+    wave: 1,
+    wiggle_phase: 0,
+    held_piece: nil,
+    hold_used_this_drop: false,
+    soft_drop_allowed: true,
+    grid: Array.new(GRID_WIDTH * GRID_HEIGHT)
+  }
+end
+
 def self.reset args
   bootstrap
 end
 
-# Main tick: runs every frame
 def self.tick args
   $outputs.background_color = [0, 0, 0]
 
   game_has_lost_focus?
 
-  # Create a separate render target for the garden playfield
   $outputs[:garden].w = GAME_WIDTH
   $outputs[:garden].h = GAME_HEIGHT
   $outputs[:garden].background_color = [25, 50, 25]
 
-  # Convert mouse position into grid coordinates
   $gg.mouse_position = {
     x: ($inputs.mouse.x - OFFSET_X).idiv(ZOOM),
     y: ($inputs.mouse.y - OFFSET_Y).idiv(ZOOM),
@@ -163,13 +162,10 @@ def self.tick args
     h: 1
   }
 
-  # Handle camera shake effect
   screenshake
 
-  # Scene manager: switch between setup, title, gameplay, and game over
-  SCENES[$gg.current_scene].call
+  send($gg.current_scene)
 
-  # Render scaled garden output onto the screen
   $outputs.primitives << {
     x: WIDTH / 2 + $gg.camera_x_offset,
     y: HEIGHT / 2 + $gg.camera_y_offset,
@@ -182,49 +178,114 @@ def self.tick args
 
   $gg.clock += 1 unless $gg.lost_focus
 
-  # Handle scene transitions
   $gg.current_scene = $gg.next_scene if $gg.current_scene != $gg.next_scene
 end
 
-############################
-# --- GAMEPLAY LOGIC ---
-############################
-
 def self.tick_game
   unless $gg.lost_focus
-    # Check if blocks are unstable and should fall
     if any_loose_blocks?
       $gg.loose_blocks = :true
     else
-      # Check for flower clusters if pending
       if $gg.pending_shape_check
         check_for_flower_clusters
         $gg.pending_shape_check = false
+
+        unless any_loose_blocks? || $gg.falling_blocks.any?
+          check_trapped_resources
+        end
       end
       $gg.loose_blocks = nil
     end
 
-    # Spawn a new falling block if the grid is clear
     unless $gg.loose_blocks
-      spawn_falling_block if $gg.falling_blocks.empty? unless $gg.blinking_shapes.any?
+      if $gg.falling_blocks.empty?
+        unless $gg.blinking_shapes.any?
+          check_wave_completion
+          $gg.hold_used_this_drop = false
+          $gg.soft_drop_allowed = false
+          spawn_falling_block
+        end
+      end
     end
 
-    # Move unstable blocks downward
     move_loose_blocks_down if $gg.loose_blocks
 
-    # Handle keyboard input for player control
     handle_block_input
   end
 
-  # Draw all blocks (fixed + falling + blinking)
   render_grid
 
-  update_flower_rotations if $gg.clock % 10 == 0
+  update_flower_rotations if $gg.clock % 10 == 0 unless $gg.lost_focus
+
+  if $gg.score < $gg.total_score
+    increment =
+      if $gg.total_score - $gg.score >= 150
+        150
+      elsif $gg.total_score - $gg.score >= 25
+        25
+      elsif $gg.total_score - $gg.score >= 10
+        10
+      else
+        1
+      end
+
+    $gg.score += increment
+    $gg.score = $gg.total_score if $gg.score > $gg.total_score
+    sound_score
+
+    if $gg.score > $gg.high_score
+      $gg.high_score = $gg.score
+      $gtk.write_file "data/high_score.txt", $gg.high_score.to_s
+    end
+  end
 end
 
-# Handle left/right/down block movement with cooldowns
+def self.sound_score
+  $audio[rand] = {
+    input: 'sounds/tinkerbell.ogg',  # Filename
+    x: 0.0, y: 0.0, z: 0.0,          # Relative position to the listener, x, y, z from -1.0 to 1.0
+    gain: 0.2,                       # Volume (0.0 to 1.0)
+    pitch: 1.0,                      # Pitch of the sound (1.0 = original pitch)
+    paused: false,                   # Set to true to pause the sound at the current playback position
+    looping: false                   # Set to true to loop the sound/music until you stop it
+  }
+end
+
+def self.sound_shape
+  $audio[:shape] ||= {
+    input: 'sounds/greenhit.ogg',    # Filename
+    x: 0.0, y: 0.0, z: 0.0,          # Relative position to the listener, x, y, z from -1.0 to 1.0
+    gain: 0.5,                       # Volume (0.0 to 1.0)
+    pitch: 1.0,                      # Pitch of the sound (1.0 = original pitch)
+    paused: false,                   # Set to true to pause the sound at the current playback position
+    looping: false                   # Set to true to loop the sound/music until you stop it
+  }
+end
+
+def self.sound_block
+  $audio[:block] ||= {
+    input: 'sounds/pop.ogg',         # Filename
+    x: 0.0, y: 0.0, z: 0.0,          # Relative position to the listener, x, y, z from -1.0 to 1.0
+    gain: 0.5,                       # Volume (0.0 to 1.0)
+    pitch: 1.0,                      # Pitch of the sound (1.0 = original pitch)
+    paused: false,                   # Set to true to pause the sound at the current playback position
+    looping: false                   # Set to true to loop the sound/music until you stop it
+  }
+end
+
+def self.sound_hold
+  $audio[:hold] ||= {
+    input: 'sounds/swish1.ogg',      # Filename
+    x: 0.0, y: 0.0, z: 0.0,          # Relative position to the listener, x, y, z from -1.0 to 1.0
+    gain: 0.5,                       # Volume (0.0 to 1.0)
+    pitch: 1.0,                      # Pitch of the sound (1.0 = original pitch)
+    paused: false,                   # Set to true to pause the sound at the current playback position
+    looping: false                   # Set to true to loop the sound/music until you stop it
+  }
+end
+
 def self.handle_block_input
-  # LEFT
+  return if $gg.lost_focus
   if $inputs.keyboard.left
     if $gg.clock - $gg.left_moved_at >= $gg.left_cooldown
       move_block_left
@@ -241,7 +302,6 @@ def self.handle_block_input
     $gg.left_pending = false
   end
 
-  # RIGHT
   if $inputs.keyboard.right
     if $gg.clock - $gg.right_moved_at >= $gg.right_cooldown
       move_block_right
@@ -258,16 +318,39 @@ def self.handle_block_input
     $gg.right_pending = false
   end
 
-  # DOWN
-  move_block_down if $inputs.keyboard.down
+  $gg.soft_drop_allowed = true if !$inputs.keyboard.down
 
-  # Automatic downward movement every 30 ticks
+  move_block_down if $inputs.keyboard.down && $gg.soft_drop_allowed
+
   move_block_down if $gg.clock % 30 == 0
+
+  if $inputs.keyboard.key_down.space
+    hold_current_piece
+  end
 end
 
-############################
-# --- GRID HELPERS ---
-############################
+def self.hold_current_piece
+  return if $gg.hold_used_this_drop
+  return if $gg.falling_blocks.empty?
+
+  sound_hold
+  current_piece = $gg.falling_blocks.first
+
+  if $gg.held_piece.nil?
+    $gg.held_piece = current_piece
+    $gg.falling_blocks.clear
+    spawn_falling_block
+  else
+    tmp = $gg.held_piece
+    $gg.held_piece = current_piece
+    $gg.falling_blocks.clear
+    tmp[:x] = (GRID_WIDTH / 2).floor
+    tmp[:y] = GRID_HEIGHT
+    $gg.falling_blocks << tmp
+  end
+
+  $gg.hold_used_this_drop = true
+end
 
 def self.grid_index(x, y)
   y * GRID_WIDTH + x
@@ -279,62 +362,130 @@ def self.get_block(x, y)
 end
 
 def self.set_block(x, y, block)
-  $gg.grid[grid_index(x, y)] = block
+  if block && block.type == :water && block.frame_offset.nil?
+    block.frame_offset = 0 # rand(WATER_FRAME_COUNT)
+  end
+  # if a block is at y GRID_HEIGHT and we're trying to set it - it's game over
+  if y == GRID_HEIGHT
+    $gg.game_over_at = $gg.clock
+    $gg.next_scene = :tick_over
+  else
+    $gg.grid[grid_index(x, y)] = block
+  end
 end
 
 def self.random_block
   refill_bag_if_empty
   type = $gg.bag.shift
-  { type: type }
+  block = { type: type }
+
+  if type == :water
+    block.frame_offset = 0 # rand(WATER_FRAME_COUNT)
+  end
+
+  block
+end
+
+def self.check_trapped_resources
+  trapped = []
+
+  (0...GRID_HEIGHT-1).each do |y|
+    (0...GRID_WIDTH).each do |x|
+      block = get_block(x, y)
+      above = get_block(x, y+1)
+      next unless block && above
+
+      if [:seed, :soil, :water, :sun, :brick].include?(block.type) &&
+         above.type.to_s.start_with?("flower_")
+        trapped << block
+      end
+    end
+  end
+
+  unless trapped.empty?
+    $gg.blinking_shapes << {
+      shape: :trapped_resources,
+      blocks: trapped,
+      timer: 70,
+      visible: true,
+      blink_interval: 20
+    }
+  end
 end
 
 def self.refill_bag_if_empty
-  $gg.bag = RESOURCE_TYPES.shuffle if $gg.bag.empty?
+  # $gg.bag = RESOURCE_TYPES.shuffle if $gg.bag.empty?
+  pool = [:seed, :soil, :water] * 2
+  pool += [:sun] * 1
+  # check the unmatched resources, add another sun ?
+  if resource_block_count > 7 && sun_block_count < 4
+    # pool << :sun
+    pool += [:sun] * 2
+  end
+  # Every 2 waves, add another brick (starting at wave 2)
+  # brick_count = $gg.wave.idiv(2)   # wave 2 → 1, wave 4 → 2, etc.
+  brick_count = 0
+  brick_count += 1 if $gg.wave > 2
+  brick_count += 1 if $gg.wave > 4
+  brick_count -= 1 if $gg.wave > 6
+  pool += [:brick] * brick_count
+  # pool += [:brick] * $gg.wave if $gg.wave >= 2
+  # pool += [:seed, :soil, :water] * 1
+  $gg.bag = pool.shuffle if $gg.bag.empty?
+end
+
+def self.sun_block_count
+  $gg.grid.count { |b| b && b.type == :sun }
+end
+
+def self.resource_block_count
+  $gg.grid.count do |b|
+    # b && !b.type.to_s.start_with?("flower_") && b.type != :sun
+    # b && [:seed, :soil, :water, :brick].include?(b.type)
+    b && [:seed, :soil, :water].include?(b.type)
+  end
 end
 
 def self.spawn_falling_block
-  $gg.falling_blocks << random_block.merge(x: (GRID_WIDTH / 2).floor, y: GRID_HEIGHT)
+  $gg.falling_blocks << random_block.merge(x: (GRID_WIDTH / 2).floor, y: GRID_HEIGHT, player_controlled: true)
+  $gg.cascade_multiplier = 1
 end
-
-############################
-# --- BLOCK MOVEMENT ---
-############################
 
 def self.move_block_left
   fb = $gg.falling_blocks.first
   return unless fb
-  new_x = fb[:x] - 1
+  new_x = fb.x - 1
   return if new_x < 0
-  y_floor = fb[:y].floor
-  y_ceil = fb[:y].ceil
+  y_floor = fb.y.floor
+  y_ceil = fb.y.ceil
   return if get_block(new_x, y_floor) || get_block(new_x, y_ceil)
-  fb[:x] = new_x
+  fb.x = new_x
 end
 
 def self.move_block_right
   fb = $gg.falling_blocks.first
   return unless fb
-  new_x = fb[:x] + 1
+  new_x = fb.x + 1
   return if new_x >= GRID_WIDTH
-  y_floor = fb[:y].floor
-  y_ceil = fb[:y].ceil
+  y_floor = fb.y.floor
+  y_ceil = fb.y.ceil
   return if get_block(new_x, y_floor) || get_block(new_x, y_ceil)
-  fb[:x] = new_x
+  fb.x = new_x
 end
 
 def self.move_block_down
   landed_blocks = []
 
   $gg.falling_blocks.each do |fb|
-    next_y = fb[:y] - 0.5
+    next_y = fb.y - 0.5
     next_y_floor = next_y.floor
 
-    if next_y < 0 || get_block(fb[:x], next_y_floor)
-      fb[:y] = fb[:y].floor
-      set_block(fb[:x], fb[:y], fb)
+    if next_y < 0 || get_block(fb.x, next_y_floor)
+      fb.y = fb.y.floor
+      set_block(fb.x, fb.y, fb)
       landed_blocks << fb
     else
-      fb[:y] = next_y
+      fb.y = next_y
     end
   end
 
@@ -349,14 +500,14 @@ def self.any_loose_blocks?
       block = get_block(x, y)
       next unless block
       below_y = y - 1
-      return true if (below_y >= 0 && !get_block(x, below_y)) || (block[:y] % 1) == 0.5
+      return true if (below_y >= 0 && !get_block(x, below_y)) || (block.y % 1) == 0.5
     end
   end
   false
 end
 
 def self.move_loose_blocks_down
-  return unless $gg.clock.zmod?(6)
+  return unless $gg.clock.zmod?(4)
 
   loose_blocks = []
 
@@ -364,7 +515,7 @@ def self.move_loose_blocks_down
     (0...GRID_WIDTH).each do |x|
       b = get_block(x, y)
       next unless b
-      below_y = b[:y] - 0.5
+      below_y = b.y - 0.5
       next if below_y < 0
       below_floor = below_y.floor
       below_block = get_block(x, below_floor)
@@ -374,29 +525,27 @@ def self.move_loose_blocks_down
 
   return if loose_blocks.empty?
 
-  lowest_y = loose_blocks.map { |b| b[:y] }.min
-  lowest_loose = loose_blocks.select { |b| b[:y] == lowest_y }
+  lowest_y = loose_blocks.map { |b| b.y }.min
+  lowest_loose = loose_blocks.select { |b| b.y == lowest_y }
 
   lowest_loose.each do |b|
-    old_y = b[:y]
+    old_y = b.y
     old_floor = old_y.floor
     new_y = [old_y - 0.5, 0.0].max
     new_floor = new_y.floor
     if new_floor < old_floor
-      set_block(b[:x], old_floor, nil)
-      b[:y] = new_y
-      set_block(b[:x], new_floor, b)
+      set_block(b.x, old_floor, nil)
+      b.y = new_y
+      set_block(b.x, new_floor, b)
     else
-      b[:y] = new_y
+      b.y = new_y
     end
   end
 end
 
-############################
-# --- FLOWER DETECTION ---
-############################
-
 def self.check_for_flower_clusters
+  all_matches = []
+
   GRID_WIDTH.times do |x|
     GRID_HEIGHT.times do |y|
       ALL_SHAPES.each do |shape_name, patterns|
@@ -407,151 +556,338 @@ def self.check_for_flower_clusters
           blocks = coords.map { |dx, dy| get_block(x + dx, y + dy) }
           next if blocks.any?(&:nil?)
 
-          actual_types = blocks.map { |b| b[:type] }
-
-          match = if expected_types.is_a?(Array) && expected_types.all? { |t| RESOURCE_TYPES.include?(t) } && expected_types.size == actual_types.size
-                    actual_types.sort == expected_types.sort
-                  else
-                    actual_types == expected_types
-                  end
-
-          next unless match
-
-          unless $gg.blinking_shapes.any? { |s| (s[:blocks] & blocks).any? }
-            if shape_name.to_s.end_with?("_flowers")
-              # This is a flower shape — include nearby rocks
-              all_blocks = blocks.dup + nearby_rocks(blocks)
-              $gg.blinking_shapes << {
-                shape: shape_name,
-                blocks: all_blocks,
-                timer: 60,
-                visible: true,
-                blink_interval: 10
-              }
+          block_types = blocks.map(&:type)
+          match = expected_types.all? do |t|
+            if t == :sun
+              block_types.include?(:sun)
             else
-              # Normal resource shape — no rocks affected
-              $gg.blinking_shapes << {
-                shape: shape_name,
-                blocks: blocks.dup,
-                timer: 60,
-                visible: true,
-                blink_interval: 10
-              }
+              index = block_types.index(t)
+              block_types.delete_at(index) if index
+              !!index
             end
           end
-=begin
-          # Prevent duplicate blinking shapes
-          unless $gg.blinking_shapes.any? { |s| (s[:blocks] & blocks).any? }
-            $gg.blinking_shapes << {
-              shape: shape_name,
-              blocks: blocks.dup,
-              timer: 60,
-              visible: true,
-              blink_interval: 10
-            }
-          end
-=end
+          next unless match
+
+          all_matches << { shape: shape_name, blocks: blocks }
         end
       end
     end
   end
+
+  return if all_matches.empty?
+
+  best_set = []
+  best_count = 0
+
+  best = { count: 0, set: [] }
+  explore(all_matches, 0, [], [], best)
+  best_set = best[:set]
+
+  best_set.each do |match|
+    blink_blocks = match[:blocks]
+
+    if match[:shape].to_s.end_with?("_flowers")
+      bricks = nearby_bricks(blink_blocks)
+      blink_blocks += bricks
+    end
+
+    $gg.blinking_shapes << {
+      shape: match[:shape],
+      blocks: blink_blocks,
+      timer: 70,
+      visible: true,
+      blink_interval: 20
+    }
+  end
 end
 
-def self.nearby_rocks(blocks)
-  rocks = []
+def self.explore(matches, index, current_set, used_non_sun_blocks, best)
+  if index >= matches.size
+    total_non_sun = current_set.sum { |m| m[:blocks].count { |b| b.type != :sun } }
+    if total_non_sun > best[:count]
+      best[:count] = total_non_sun
+      best[:set] = current_set.dup
+    end
+    return
+  end
+
+  match = matches[index]
+  non_sun_blocks = match[:blocks].reject { |b| b.type == :sun }
+
+  explore(matches, index + 1, current_set, used_non_sun_blocks, best)
+
+  if (non_sun_blocks & used_non_sun_blocks).empty?
+    explore(matches, index + 1,
+            current_set + [match],
+            used_non_sun_blocks + non_sun_blocks,
+            best)
+  end
+end
+
+def self.nearby_bricks(blocks)
+  bricks = []
   blocks.each do |b|
-    x, y = b[:x], b[:y]
-    [[1,0],[-1,0],[0,1],[0,-1]].each do |dx, dy|
+    x, y = b.x, b.y
+    # [[1,0],[-1,0],[0,1],[0,-1]].each do |dx, dy|
+    [
+      [ 1, 0], [-1, 0], [0,  1], [0, -1], # orthogonal
+      [ 1, 1], [-1, 1], [1, -1], [-1, -1] # diagonals
+    ].each do |dx, dy|
       nb = get_block(x+dx, y+dy)
-      rocks << nb if nb && nb[:type] == :rock
+      bricks << nb if nb && nb.type == :brick
     end
   end
-  rocks.uniq
+  bricks.uniq
 end
 
-############################
-# --- RENDERING ---
-############################
+def self.water_frame_index_for(block)
+  base = ($gg.clock / WATER_TICKS_PER_FRAME).floor
+  offset = block.frame_offset.to_i
+  (base + offset) % WATER_FRAME_COUNT
+end
+
+def self.path_for_block_sprite(block_type, block = nil)
+  if block_type == :water && block
+    frame = water_frame_index_for(block)
+    return "sprites/water_#{frame}.png"
+  end
+
+  "sprites/#{block_type}.png"
+end
 
 def self.render_grid
-  # Render fixed blocks
   $gg.grid.each do |block|
     next unless block
-    next if $gg.blinking_shapes.any? { |s| s[:blocks].include?(block) }
+    next if $gg.blinking_shapes.any? { |s| s.blocks.include?(block) }
 
-    x = block[:x] * TILE_SIZE + GRID_OFFSET_X
-    y = block[:y] * TILE_SIZE + GRID_OFFSET_Y
+    x = block.x * TILE_SIZE + GRID_OFFSET_X
+    y = block.y * TILE_SIZE + GRID_OFFSET_Y
 
-    render_sprite = { x: x, y: y, w: TILE_SIZE, h: TILE_SIZE, path: "sprites/#{block[:type]}.png" }
-    
-    if block[:angle]
-      render_sprite[:angle] = block[:angle]
-      #render_sprite[:angle_anchor_x] = 0.5
-      #render_sprite[:angle_anchor_y] = 0.5
+    if $gg.current_scene == :tick_over
+      jitter_x = Math.sin($gg.wiggle_phase + block.x * 0.5) * 3
+      jitter_y = Math.cos($gg.wiggle_phase + block.y * 0.5) * 3
+      x += jitter_x
+      y += jitter_y
     end
 
-    $outputs[:garden].sprites << render_sprite
+    sprite_path = path_for_block_sprite(block.type, block)
+
+    if block.type == :water
+      $gg.tmp_sprites << { x: x, y: y, w: TILE_SIZE, h: TILE_SIZE, path: :pixel, r: 0, g: 0, b: 200 }
+    end
+
+    if block.type == :sun
+      render_sprite = { x: x, y: y, w: TILE_SIZE * 1.65, h: TILE_SIZE * 1.65, path: sprite_path, anchor_x: 0.2, anchor_y: 0.2 }
+    else
+      render_sprite = { x: x, y: y, w: TILE_SIZE, h: TILE_SIZE, path: sprite_path }
+    end
+
+    if block.angle
+      render_sprite.angle = block.angle
+    end
+
+    $gg.tmp_sprites << render_sprite
   end
 
-  # Render falling blocks
   $gg.falling_blocks.each do |fb|
-    x = fb[:x] * TILE_SIZE + GRID_OFFSET_X
-    y = fb[:y] * TILE_SIZE + GRID_OFFSET_Y
-    $outputs[:garden].sprites << { x: x, y: y, w: TILE_SIZE, h: TILE_SIZE, path: "sprites/#{fb[:type]}.png" }
+    x = fb.x * TILE_SIZE + GRID_OFFSET_X
+    y = fb.y * TILE_SIZE + GRID_OFFSET_Y
+    sprite_path = path_for_block_sprite(fb.type, fb)
+    if fb.type == :water
+      $gg.tmp_sprites << { x: x, y: y, w: TILE_SIZE, h: TILE_SIZE, path: :pixel, r: 0, g: 0, b: 200 }
+    end
+    if fb.type == :sun
+      $gg.tmp_sprites << { x: x, y: y, w: TILE_SIZE * 1.65, h: TILE_SIZE * 1.65, path: sprite_path, anchor_x: 0.2, anchor_y: 0.2 }
+    else
+      $gg.tmp_sprites << { x: x, y: y, w: TILE_SIZE, h: TILE_SIZE, path: sprite_path }
+    end
+
+    check_fb = $gg.falling_blocks.first
+    if check_fb && check_fb[:player_controlled]
+      col_x = fb.x * TILE_SIZE + GRID_OFFSET_X + TILE_SIZE / 2
+      $gg.tmp_sprites << {
+        x: col_x, y: GRID_OFFSET_Y,
+        w: TILE_SIZE, h: GRID_PIXEL_HEIGHT,
+        path: :pixel, r: 255, g: 255, b: 255, a: 2, anchor_x: 0.5
+      }
+    end
   end
 
-  # Handle blinking shapes (about to be cleared into flowers)
   if $gg.blinking_shapes
     $gg.blinking_shapes.each do |blink|
-      blink[:timer] -= 1
-      blink[:visible] = !blink[:visible] if blink[:timer] % blink[:blink_interval] == 0
+      blink.timer -= 1
+      blink.visible = !blink.visible if blink.timer % blink.blink_interval == 0
 
-      if blink[:visible]
-        blink[:blocks].each do |b|
-          x = b[:x] * TILE_SIZE + GRID_OFFSET_X
-          y = b[:y] * TILE_SIZE + GRID_OFFSET_Y
-          $outputs[:garden].sprites << { x: x, y: y, w: TILE_SIZE, h: TILE_SIZE, path: "sprites/#{b[:type]}.png" }
+      shape_key =
+        if blink.shape.to_s.end_with?("_flowers")
+          blink.shape.to_s.chomp("_flowers").to_sym
+        else
+          blink.shape
+        end
+
+      color = BLINK_COLORS[shape_key] || { r: 255, g: 255, b: 255 }
+
+      blink.blocks.each do |b|
+        x = b.x * TILE_SIZE + GRID_OFFSET_X
+        y = b.y * TILE_SIZE + GRID_OFFSET_Y
+
+        if blink.visible
+          sprite_path = path_for_block_sprite(b.type, b)
+          if b.type == :water
+            $gg.tmp_sprites << { x: x, y: y, w: TILE_SIZE, h: TILE_SIZE,
+                                 path: :pixel, r: 0, g: 0, b: 200 }
+          end
+          if b.type == :sun
+            $gg.tmp_sprites << { x: x, y: y, w: TILE_SIZE * 1.65, h: TILE_SIZE * 1.65, path: sprite_path, anchor_x: 0.2, anchor_y: 0.2 }
+          else
+            $gg.tmp_sprites << { x: x, y: y, w: TILE_SIZE, h: TILE_SIZE, path: sprite_path }
+          end
+        else
+          next if b.type == :brick
+          $gg.tmp_sprites << { x: x, y: y, w: TILE_SIZE, h: TILE_SIZE,
+                               path: :pixel, **color }
         end
       end
     end
 
-    # Clear shapes when timer expires
+    cleared_shapes = []
+
     $gg.blinking_shapes.reject! do |blink|
-      next false if blink[:timer] > 0
+      next false if blink.timer > 0
 
-      blink[:blocks].each { |b| set_block(b[:x], b[:y], nil) }
-      $gg.score += 10
-      $gg.camera_trauma = 0.5
+      blink.blocks.each do |b|
+        set_block(b.x, b.y, nil)
+        sound_block if blink.shape == :trapped_resources
+      end
 
-      # Place flower at lowest-left block
-      if blink[:shape]
-        flower_type = FLOWER_TYPES[blink[:shape]]
+      $gg.total_score += (10 * $gg.cascade_multiplier * $gg.wave)
+      $gg.cascade_multiplier *= 3
+      $gg.total_score = 1000000 if $gg.total_score > 1000000
+
+      if blink.shape
+        flower_type = FLOWER_TYPES[blink.shape]
         if flower_type
-          flower_block = lowest_leftmost_block(blink[:blocks])
+          flower_block = lowest_leftmost_block(blink.blocks)
           angle = rand 360
-          set_block(flower_block[:x], flower_block[:y], { type: flower_type, x: flower_block[:x], y: flower_block[:y], angle: angle })
+          set_block(flower_block.x, flower_block.y,
+            { type: flower_type, x: flower_block.x, y: flower_block.y, angle: angle })
+          sound_shape
         end
       end
 
       $gg.loose_blocks = true
       $gg.pending_shape_check = true
+
+      cleared_shapes << blink
       true
+    end
+
+    if cleared_shapes.any?
+      total_blocks = cleared_shapes.sum { |s| s.blocks.size }
+      $gg.camera_trauma = [0.2 + total_blocks * 0.05, 1.0].min
     end
   end
 
   draw_grid_outline
+  draw_next_preview
+  draw_score
+  draw_shape_legend
+
+  $outputs[:garden].sprites << $gg.tmp_sprites
+  $gg.tmp_sprites.clear
+end
+
+def self.draw_next_preview
+  next_block = peek_next_block
+  return unless next_block
+
+  sprite_path = path_for_block_sprite(next_block[:type], next_block)
+
+  if next_block[:type] == :water
+    $gg.tmp_sprites << { x: 1070, y: 550, w: TILE_SIZE, h: TILE_SIZE, path: :pixel, r: 0, g: 0, b: 200 }
+  end
+
+  if next_block[:type] == :sun
+    preview = { x: 1070, y: 550, w: TILE_SIZE * 1.65, h: TILE_SIZE * 1.65, path: sprite_path, anchor_x: 0.2, anchor_y: 0.2 }
+  else
+    preview = { x: 1070, y: 550, w: TILE_SIZE, h: TILE_SIZE, path: sprite_path }
+  end
+
+  $gg.tmp_sprites << preview
+
+  $outputs[:garden].labels << {
+    x: 1060, y: 680, font: "fonts/IndieFlower-Regular.ttf", size_px: 64,
+    r: 100, g: 175, b: 100, text: "Next"
+  }
+
+  $outputs[:garden].labels << {
+    x: 120, y: 680, font: "fonts/IndieFlower-Regular.ttf", size_px: 64,
+    r: 100, g: 175, b: 100, text: "Hold"
+  }
+
+  if $gg.held_piece
+    sprite_path = path_for_block_sprite($gg.held_piece[:type], $gg.held_piece)
+
+    if $gg.held_piece[:type] == :water
+      $gg.tmp_sprites << { x: 127, y: 550, w: TILE_SIZE, h: TILE_SIZE, path: :pixel, r: 0, g: 0, b: 200 }
+    end
+
+    if $gg.held_piece[:type] == :sun
+      held_preview = { x: 127, y: 550, w: TILE_SIZE * 1.65, h: TILE_SIZE * 1.65, path: sprite_path, anchor_x: 0.2, anchor_y: 0.2 }
+    else
+      held_preview = { x: 127, y: 550, w: TILE_SIZE, h: TILE_SIZE, path: sprite_path }
+    end
+    $gg.tmp_sprites << held_preview
+  end
+end
+
+def self.draw_score
+  right_margin_start = 950
+  right_margin_center = right_margin_start + (WIDTH - right_margin_start) / 2
+
+  $outputs[:garden].labels << {
+    x: right_margin_center, y: 460, font: "fonts/IndieFlower-Regular.ttf", size_px: 64,
+    r: 100, g: 175, b: 100, text: "Score", anchor_x: 0.5
+  }
+  $outputs[:garden].labels << {
+    x: right_margin_center, y: 425, font: "fonts/IndieFlower-Regular.ttf", size_px: 64,
+    r: 100, g: 250, b: 100, text: "#{$gg.score.to_s.chars.reverse.each_slice(3).map(&:join).join(",").reverse}", anchor_x: 0.5
+  }
+
+  $outputs[:garden].labels << {
+    x: right_margin_center, y: 360, font: "fonts/IndieFlower-Regular.ttf", size_px: 64,
+    r: 100, g: 175, b: 100, text: "High Score", anchor_x: 0.5
+  }
+  $outputs[:garden].labels << {
+    x: right_margin_center, y: 325, font: "fonts/IndieFlower-Regular.ttf", size_px: 64,
+    r: 100, g: 250, b: 100, text: "#{$gg.high_score.to_s.chars.reverse.each_slice(3).map(&:join).join(",").reverse}", anchor_x: 0.5
+  }
+
+  $outputs[:garden].labels << {
+    x: right_margin_center, y: 260, font: "fonts/IndieFlower-Regular.ttf", size_px: 64,
+    r: 100, g: 175, b: 100, text: "Wave", anchor_x: 0.5
+  }
+  $outputs[:garden].labels << {
+    x: right_margin_center, y: 225, font: "fonts/IndieFlower-Regular.ttf", size_px: 64,
+    r: 100, g: 250, b: 100, text: "#{$gg.wave}", anchor_x: 0.5
+  }
 end
 
 def self.update_flower_rotations
   $gg.grid.each do |b|
-    next unless b && b[:angle]
-    b[:angle] = (b[:angle]  + 1 ) % 360
+    next unless b && b.angle
+    b.angle = (b.angle + 1 ) % 360
   end
+end
+
+def self.peek_next_block
+  refill_bag_if_empty
+  { type: $gg.bag.first }
 end
 
 def self.lowest_leftmost_block(blocks)
   blocks.reduce(nil) do |best, b|
-    if best.nil? || b[:y] < best[:y] || (b[:y] == best[:y] && b[:x] < best[:x])
+    if best.nil? || b.y < best.y || (b.y == best.y && b.x < best.x)
       b
     else
       best
@@ -559,43 +895,12 @@ def self.lowest_leftmost_block(blocks)
   end
 end
 
-############################
-# --- GAME STATE HELPERS ---
-############################
-
-def self.bootstrap
-  $gg = {
-    current_scene: :setup,
-    next_scene: :setup,
-    camera_trauma: 0.5,
-    camera_x_offset: 0,
-    camera_y_offset: 0,
-    score: 0,
-    high_score: 0,
-    total_score: 0,
-    clock: 0,
-    lost_focus: true,
-    bag: [],
-    blinking_shapes: [],
-    falling_blocks: [],
-    moved_loose_blocks: [],
-    loose_blocks: nil,
-    left_moved_at: 0,
-    left_pending: false,
-    left_cooldown: 8,
-    right_moved_at: 0,
-    right_pending: false,
-    right_cooldown: 8
-  }
-  $gg.grid = Array.new(GRID_WIDTH * GRID_HEIGHT)
-end
-
 def self.draw_grid_outline
   border_thickness = 14
   left   = { x: GRID_OFFSET_X - border_thickness, y: GRID_OFFSET_Y, w: border_thickness, h: GRID_PIXEL_HEIGHT, path: :pixel, r: 100, g: 175, b: 100 }
   right  = { x: GRID_OFFSET_X + GRID_PIXEL_WIDTH, y: GRID_OFFSET_Y, w: border_thickness, h: GRID_PIXEL_HEIGHT, path: :pixel, r: 100, g: 175, b: 100 }
   bottom = { x: GRID_OFFSET_X - border_thickness, y: GRID_OFFSET_Y - border_thickness, w: GRID_PIXEL_WIDTH + border_thickness * 2, h: border_thickness, path: :pixel, r: 100, g: 175, b: 100 }
-  $outputs[:garden].sprites << [left, right, bottom]
+  $gg.tmp_sprites << [left, right, bottom]
 end
 
 def self.screenshake
@@ -611,23 +916,36 @@ def self.screenshake
   end
 end
 
-############################
-# --- SCENES ---
-############################
-
 def self.tick_setup
-  $gg.next_scene = :title
+  $audio[:music] ||= {
+    input: 'sounds/in_the_hall_of_the_mountain_king.ogg',  # Filename
+    x: 0.0, y: 0.0, z: 0.0,          # Relative position to the listener, x, y, z from -1.0 to 1.0
+    gain: 0.5,                       # Volume (0.0 to 1.0)
+    pitch: 1.0,                      # Pitch of the sound (1.0 = original pitch)
+    paused: false,                   # Set to true to pause the sound at the current playback position
+    looping: true                    # Set to true to loop the sound/music until you stop it
+  }
+
+  contents = $gtk.read_file "data/high_score.txt"
+  if !contents
+    $gtk.write_file "data/high_score.txt", "0"
+  else
+    $gg.high_score = contents.to_i
+  end
+
+  $gg.next_scene = :tick_title
 end
 
 def self.tick_title
   $outputs[:garden].labels << {
     x: 1260 / 2, y: 500, font: "fonts/IndieFlower-Regular.ttf", size_px: 256,
-    r: 100, g: 175, b: 100, text: "Flower Garden", anchor_x: 0.5
+    r: 100, g: 250, b: 100, text: "Flower Garden", anchor_x: 0.5
   }
+
+  falling_flowers
 
   return if $gg.clock < 30
 
-  # Reset high score if h is held down and r is pressed
   if $inputs.keyboard.key_down.r && $inputs.keyboard.key_held.h
     $gtk.write_file "data/high_score.txt", "0"
     $gg.high_score = 0
@@ -635,9 +953,158 @@ def self.tick_title
     $gtk.reset
   end
 
-  # Start game on any key or mouse click
   if ($inputs.keyboard.key_up.truthy_keys.any? || $inputs.mouse.click)
-    $gg.next_scene = :game
+    $gg.title_flowers.clear
+    $gg.next_scene = :tick_game
+  end
+end
+
+def self.tick_over
+  $outputs[:garden].labels << {
+    x: 1260 / 2, y: 500, font: "fonts/IndieFlower-Regular.ttf", size_px: 256,
+    r: 100, g: 250, b: 100, text: "Game Over", anchor_x: 0.5
+  }
+
+  $gg.wiggle_phase += 0.1
+  falling_flowers
+  render_grid
+
+  return if ($gg.clock - $gg.game_over_at) < 120
+
+  if ($inputs.keyboard.key_up.truthy_keys.any? || $inputs.mouse.click)
+    $gtk.reset
+  end
+end
+
+def self.falling_flowers
+  if $gg.clock % 5 == 0
+    spawn_title_flower unless $gg.lost_focus
+  end
+
+  $gg.title_flowers.each do |f|
+    f.y -= 0.05
+    f.x += f.drift
+
+    screen_tiles = WIDTH / TILE_SIZE
+    if f.x < 0
+      f.x = 0
+      f.drift = f.drift.abs
+    elsif f.x > screen_tiles
+      f.x = screen_tiles
+      f.drift = -f.drift.abs
+    end
+
+    f.angle = (f.angle + 1) % 360 if f.angle
+  end
+
+  $gg.title_flowers.reject! { |f| f.y * TILE_SIZE + GRID_OFFSET_Y < -TILE_SIZE }
+
+  $gg.title_flowers.each do |f|
+    x = f.x * TILE_SIZE + GRID_OFFSET_X
+    y = f.y * TILE_SIZE + GRID_OFFSET_Y
+    sprite_path = path_for_block_sprite(f.type, f)
+
+    $gg.tmp_sprites << {
+      x: x - 350 , y: y, w: TILE_SIZE, h: TILE_SIZE,
+      path: sprite_path, angle: f.angle, a: 128
+    }
+  end
+
+  $outputs[:garden].sprites << $gg.tmp_sprites
+  $gg.tmp_sprites.clear
+end
+
+def self.check_wave_completion
+  rows = count_flower_rows_from_bottom
+  if rows >= $gg.wave
+    $gg.wave += 1
+    $gg.total_score += 1000
+  end
+end
+
+def self.count_flower_rows_from_bottom
+  count = 0
+  (0...GRID_HEIGHT).each do |y|
+    if row_full_of_flowers?(y)
+      count += 1
+    else
+      break
+    end
+  end
+  count
+end
+
+def self.row_full_of_flowers?(y)
+  (0...GRID_WIDTH).all? do |x|
+    block = get_block(x, y)
+    block && block.type.to_s.start_with?("flower_")
+  end
+end
+
+def self.spawn_title_flower
+  flower_type = FLOWER_TYPES.values.sample
+
+  x = rand(GAME_WIDTH / TILE_SIZE)
+  y = GRID_HEIGHT + 2 + rand(11)
+
+  block = {
+    type: flower_type,
+    x: x,
+    y: y,
+    angle: rand(360),
+    drift: (rand * 0.1) - 0.05,
+  }
+  $gg.title_flowers << block
+end
+
+def self.draw_shape_legend
+  x_offset = 95
+  y_offset = 475
+  size = 16
+
+  FLOWER_TYPES.each_with_index do |(shape, flower_type), idx|
+    coords = SHAPES[shape].first
+
+    min_x = coords.map(&:first).min
+    max_x = coords.map(&:first).max
+    shape_width = max_x - min_x + 1
+
+    center_x_offset = -((min_x + max_x) / 2.0)
+
+    min_y = coords.map(&:last).min
+    max_y = coords.map(&:last).max
+    center_y_offset = -((min_y + max_y) / 2.0) + 0.55
+
+    base_x = x_offset
+    base_y = y_offset - idx * 75
+
+    color = BLINK_COLORS[shape]
+    coords.each do |dx, dy|
+      adj_x = dx + center_x_offset
+      adj_y = dy + center_y_offset
+      $gg.tmp_sprites << {
+        x: base_x + adj_x * size,
+        y: base_y + adj_y * size,
+        w: size,
+        h: size,
+        path: :pixel,
+        **color
+      }
+    end
+
+    $outputs[:garden].labels << {
+      x: (base_x + 4 * size) - 5, y: base_y + size + 17, font: "fonts/IndieFlower-Regular.ttf",
+      size_px: 32, r: 100, g: 175, b: 100,  text: "-"
+    }
+
+    sprite_path = path_for_block_sprite(flower_type)
+    $gg.tmp_sprites << {
+      x: base_x + 6 * size,
+      y: base_y - 6,
+      w: size * 3,
+      h: size * 3,
+      path: sprite_path
+    }
   end
 end
 
@@ -645,6 +1112,17 @@ def self.game_has_lost_focus?
   return true if Kernel.tick_count < 30
 
   focus = !$inputs.keyboard.has_focus
+
+  if focus != $gg.lost_focus
+    if focus
+      # putz "lost focus"
+      $audio[:music] && $audio[:music].paused = true
+    else
+      # putz "gained focus"
+      $audio[:music] && $audio[:music].paused = false
+    end
+  end
+  # $gg.focus_color = focus ? { r: 225, g: 50, b: 50 } : { r: 50, g: 225, b: 50 }
   $gg.lost_focus = focus
 end
 
