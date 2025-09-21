@@ -112,7 +112,6 @@ def self.bootstrap
     score: 0,
     total_score: 0,
     high_score: 0,
-    total_score: 0,
     clock: 0,
     lost_focus: true,
     bag: [],
@@ -126,7 +125,6 @@ def self.bootstrap
     left_cooldown: 8,
     right_moved_at: 0,
     right_pending: false,
-    right_pending: false,
     right_cooldown: 8,
     tmp_blocks: [],
     tmp_types: [],
@@ -138,7 +136,11 @@ def self.bootstrap
     held_piece: nil,
     hold_used_this_drop: false,
     soft_drop_allowed: true,
-    grid: Array.new(GRID_WIDTH * GRID_HEIGHT)
+    grid: Array.new(GRID_WIDTH * GRID_HEIGHT),
+    hold_piece_rect: { x: 0, y: 480, w: 256, h: 240 },
+    touch_left_rect: { x: 0, y: 180, w: 640, h: 540 },
+    touch_right_rect: { x: 640, y: 180, w: 640, h: 540 },
+    touch_down_rect: { x: 0, y: 0, w: 1280, h: 180 }
   }
 end
 
@@ -211,6 +213,7 @@ def self.tick_game
     move_loose_blocks_down if $gg.loose_blocks
 
     handle_block_input
+    handle_touch_input
   end
 
   render_grid
@@ -286,6 +289,7 @@ end
 
 def self.handle_block_input
   return if $gg.lost_focus
+
   if $inputs.keyboard.left
     if $gg.clock - $gg.left_moved_at >= $gg.left_cooldown
       move_block_left
@@ -318,7 +322,7 @@ def self.handle_block_input
     $gg.right_pending = false
   end
 
-  $gg.soft_drop_allowed = true if !$inputs.keyboard.down
+  $gg.soft_drop_allowed = true if !$inputs.keyboard.down && !$inputs.mouse.down
 
   move_block_down if $inputs.keyboard.down && $gg.soft_drop_allowed
 
@@ -327,6 +331,65 @@ def self.handle_block_input
   if $inputs.keyboard.key_down.space
     hold_current_piece
   end
+end
+
+def self.handle_touch_input
+  return if $gg.lost_focus
+  return if !$inputs.mouse.click
+
+  if check_touch_left
+    if $gg.clock - $gg.left_moved_at >= $gg.left_cooldown
+      move_block_left
+      $gg.left_moved_at = $gg.clock
+      $gg.left_pending = false
+    else
+      $gg.left_pending = true
+    end
+  elsif $gg.left_pending && $gg.clock - $gg.left_moved_at >= $gg.left_cooldown
+    move_block_left
+    $gg.left_moved_at = $gg.clock
+    $gg.left_pending = false
+  else
+    $gg.left_pending = false
+  end
+
+  if check_touch_right
+    if $gg.clock - $gg.right_moved_at >= $gg.right_cooldown
+      move_block_right
+      $gg.right_moved_at = $gg.clock
+      $gg.right_pending = false
+    else
+      $gg.right_pending = true
+    end
+  elsif $gg.right_pending && $gg.clock - $gg.right_moved_at >= $gg.right_cooldown
+    move_block_right
+    $gg.right_moved_at = $gg.clock
+    $gg.right_pending = false
+  else
+    $gg.right_pending = false
+  end
+
+  $gg.soft_drop_allowed = true if !$inputs.keyboard.down && !$inputs.mouse.down
+
+  move_block_down if check_touch_down && $gg.soft_drop_allowed
+
+  # move_block_down if $gg.clock % 30 == 0
+
+  if $inputs.mouse.inside_rect? $gg.hold_piece_rect
+    hold_current_piece
+  end
+end
+
+def self.check_touch_left
+  $inputs.mouse.inside_rect? $gg.touch_left_rect
+end
+
+def self.check_touch_right
+  $inputs.mouse.inside_rect? $gg.touch_right_rect
+end
+
+def self.check_touch_down
+  $inputs.mouse.inside_rect? $gg.touch_down_rect
 end
 
 def self.hold_current_piece
@@ -344,8 +407,8 @@ def self.hold_current_piece
     tmp = $gg.held_piece
     $gg.held_piece = current_piece
     $gg.falling_blocks.clear
-    tmp[:x] = (GRID_WIDTH / 2).floor
-    tmp[:y] = GRID_HEIGHT
+    tmp.x = (GRID_WIDTH / 2).floor
+    tmp.y = GRID_HEIGHT
     $gg.falling_blocks << tmp
   end
 
@@ -428,6 +491,7 @@ def self.refill_bag_if_empty
   brick_count += 1 if $gg.wave > 2
   brick_count += 1 if $gg.wave > 4
   brick_count -= 1 if $gg.wave > 6
+  brick_count += 1 if $gg.wave > 7
   pool += [:brick] * brick_count
   # pool += [:brick] * $gg.wave if $gg.wave >= 2
   # pool += [:seed, :soil, :water] * 1
@@ -792,9 +856,15 @@ def self.render_grid
   draw_next_preview
   draw_score
   draw_shape_legend
+  # draw_hold_piece_rect
 
   $outputs[:garden].sprites << $gg.tmp_sprites
   $gg.tmp_sprites.clear
+end
+
+def self.draw_hold_piece_rect
+  $gg.tmp_sprites << $gg.hold_piece_rect.merge(path: :pixel, a: 128)
+  # $gg.tmp_sprites << $gg.touch_right_rect.merge(path: :pixel, a: 128)
 end
 
 def self.draw_next_preview
